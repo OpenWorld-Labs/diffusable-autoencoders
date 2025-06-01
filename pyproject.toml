@@ -33,3 +33,6 @@ dev = [
 
 [tool.uv.sources]
 lpips = { git = "https://github.com/shahbuland/PerceptualSimilarity" }
+
+[tool.setuptools]
+packages = ["owl_vaes"]
