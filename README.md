@@ -48,7 +48,7 @@ docker build \
   --build-arg DEV_MODE=true \
   -t owl_vaes:dev .
 
-docker run -it owl_vaes:dev /bin/bash
+docker run --gpus all -it owl_vaes:dev /bin/bash
 ```
 
 Without dev dependencies:
@@ -56,5 +56,5 @@ Without dev dependencies:
 docker build \
   -t owl_vaes:latest .
 
-docker run -it owl_vaes:latest /bin/bash
+docker run --gpus all -it owl_vaes:latest /bin/bash
 ```
