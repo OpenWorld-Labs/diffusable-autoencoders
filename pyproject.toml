@@ -24,6 +24,13 @@ dependencies = [
     "pre-commit>=4.2.0",
 ]
 
+[[tool.pip.index]]
+url = "https://download.pytorch.org/whl/cu128"
+
+[[tool.uv.index]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cu128"
+
 [dependency-groups]
 dev = [
     "basedpyright>=1.29.2",
@@ -33,6 +40,7 @@ dev = [
 
 [tool.uv.sources]
 lpips = { git = "https://github.com/shahbuland/PerceptualSimilarity" }
+torch = { index = "pytorch" }
 
 [tool.setuptools]
 packages = ["owl_vaes"]
