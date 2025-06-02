@@ -128,8 +128,8 @@ class DecTuneTrainer(BaseTrainer):
         self.encoder = self.encoder.cuda().bfloat16().eval()
         freeze(self.encoder)
 
-        #self.encoder = torch.compile(self.encoder)
-        #self.lpips.model = torch.compile(self.lpips.model)
+        #self.encoder = torch.compile(self.encoder, mode="max-autotune", fullgraph=True)
+        #self.lpips.model = torch.compile(self.lpips.model, mode="max-autotune", fullgraph=True)
 
         self.ema = EMA(
             self.model,

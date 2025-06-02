@@ -5,6 +5,7 @@ import torch.nn.functional as F
 import einops as eo
 
 from .attn import Attn
+from .normalization import LayerNorm
 from ..configs import TransformerConfig
 
 """

@@ -80,10 +80,11 @@ class TiToKVAE(nn.Module):
         # x is [b,c,h,w]
         z = self.encoder(x) # -> [b,l,d]
 
-        if self.config.noise_decoder_inputs > 0.0:
-            dec_input = z + torch.randn_like(z) * self.config.noise_decoder_inputs
-        else:
-            dec_input = z.clone()
+        dec_input = torch.cond(
+            self.config.noise_decoder_inputs > 0.0,
+            lambda: z + torch.randn_like(z) * self.config.noise_decoder_inputs,
+            lambda: z.clone(),
+        )
 
         rec = self.decoder(dec_input)
 

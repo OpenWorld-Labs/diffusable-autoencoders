@@ -17,8 +17,8 @@ class Attn(nn.Module):
 
         self.n_heads = config.n_heads
 
-        self.qkv = nn.Linear(config.d_model, 3 * config.d_model)
-        self.out = nn.Linear(config.d_model, config.d_model)
+        self.qkv = nn.Linear(config.d_model, 3 * config.d_model, bias=False)
+        self.out = nn.Linear(config.d_model, config.d_model, bias=False)
 
         self.qk_norm = QKNorm(config.d_model // config.n_heads)
 
@@ -27,7 +27,6 @@ class Attn(nn.Module):
         self.causal = config.causal
 
     def forward(self, x):
-
         q,k,v = eo.rearrange(self.qkv(x), 'b n (three h d) -> three b h n d', three = 3, h = self.n_heads)
         q,k = self.qk_norm(q,k)
         x = F.scaled_dot_product_attention(q,k,v,is_causal=self.causal)
@@ -95,7 +94,7 @@ class PatchProjOut(nn.Module):
 
         self.norm = LayerNorm(d_model)
         self.act = nn.SiLU()
-        self.proj = nn.Linear(d_model, channels*patch_size*patch_size)
+        self.proj = nn.Linear(d_model, channels*patch_size*patch_size, bias=False)
         self.sample_size = sample_size
         self.patch_size = patch_size
 
