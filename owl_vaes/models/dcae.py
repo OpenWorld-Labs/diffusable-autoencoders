@@ -128,16 +128,8 @@ class DCAE(nn.Module):
         self.config = config
 
     def forward(self, x):
-        # Mark the beginning of a new CUDA Graph step
-        if hasattr(torch.compiler, 'cudagraph_mark_step_begin'):
-            torch.compiler.cudagraph_mark_step_begin()
-            
-        # Clone input to prevent overwriting
-        x = x.clone()
-        
         z = self.encoder(x)
-        down_z = F.interpolate(z, scale_factor=.5, mode='bilinear')
-        
+        down_z = F.interpolate(z, scale_factor=.5,mode='bilinear')
         if self.config.noise_decoder_inputs > 0.0:
             dec_input = z + torch.randn_like(z) * self.config.noise_decoder_inputs
             down_dec_input = down_z + torch.randn_like(down_z) * self.config.noise_decoder_inputs
