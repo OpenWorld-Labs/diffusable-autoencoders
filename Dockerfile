@@ -9,6 +9,15 @@ RUN apt update && \
     git \
     curl \
     ca-certificates \
+    python3-dev \
+    python3-pip \
+    python3-venv \
+    gcc \
+    g++ \
+    make \
+    autoconf \
+    libtool \
+    pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 COPY . /app
