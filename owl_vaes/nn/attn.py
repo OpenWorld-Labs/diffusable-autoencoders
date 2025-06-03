@@ -1,4 +1,5 @@
 import einops as eo
+from einops.layers.torch import Rearrange
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -26,11 +27,14 @@ class Attn(nn.Module):
             mimetic_init(self.qkv, self.out, config)
         self.causal = config.causal
 
+        self.rearrange_qkv = Rearrange('b n (three h d) -> three b h n d', three = 3, h = self.n_heads)
+        self.rearrange_out = Rearrange('b h n d -> b n (h d)')
+
     def forward(self, x):
-        q,k,v = eo.rearrange(self.qkv(x), 'b n (three h d) -> three b h n d', three = 3, h = self.n_heads)
+        q,k,v = self.rearrange_qkv(self.qkv(x))
         q,k = self.qk_norm(q,k)
         x = F.scaled_dot_product_attention(q,k,v,is_causal=self.causal)
-        x = eo.rearrange(x, 'b h n d -> b n (h d)')
+        x = self.rearrange_out(x)
         x = self.out(x)
         return x
 
@@ -81,11 +85,12 @@ class PatchProjIn(nn.Module):
         super().__init__()
 
         self.proj_in = nn.Conv2d(channels, d_model, patch_size, patch_size, 0, bias=False)
+        self.rearrange = Rearrange('b c h w -> b (h w) c')
 
     def forward(self, x):
         b,c,h,w = x.shape
         x = self.proj_in(x)
-        x = eo.rearrange(x, 'b c h w -> b (h w) c')
+        x = self.rearrange(x)
         return x
 
 class PatchProjOut(nn.Module):
@@ -99,12 +104,13 @@ class PatchProjOut(nn.Module):
         self.patch_size = patch_size
 
         self.n_patches = self.sample_size//self.patch_size
+        self.rearrange = Rearrange('b (h w) (ph pw c) -> b c (h ph) (w pw)', h = self.n_patches, ph = self.patch_size, pw = self.patch_size)
 
     def forward(self, x):
         x = self.norm(x)
         x = self.act(x)
         x = self.proj(x)
-        x = eo.rearrange(x, 'b (h w) (ph pw c) -> b c (h ph) (w pw)', h = self.n_patches, ph = self.patch_size, pw = self.patch_size)
+        x = self.rearrange(x)
 
         return x
 

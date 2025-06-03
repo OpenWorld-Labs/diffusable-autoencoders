@@ -1,4 +1,5 @@
-from einops.layers.torch import Rearrange, Reduce
+from einops.layers.torch import Reduce
+import einops as eo
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -42,6 +43,7 @@ class Encoder(nn.Module):
 
         self.avg_factor = ch // config.latent_channels
         self.conv_out = nn.Conv2d(ch, config.latent_channels, 1, 1, 0, bias=False)
+        self.reduce = Reduce('b (rep c) h w -> b c h w', rep = self.avg_factor, reduction = 'mean')
 
 
     def forward(self, x):
@@ -54,7 +56,7 @@ class Encoder(nn.Module):
         x = self.final(x) + x
 
         res = x.clone()
-        res = eo.layers.torchreduce(res, 'b (rep c) h w -> b c h w', rep = self.avg_factor, reduction = 'mean')
+        res = self.reduce(res)
         x = self.conv_out(x) + res
 
         return x
