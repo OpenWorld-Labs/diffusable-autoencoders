@@ -14,3 +14,4 @@ typings/
 build
 *.egg-info
 torch_compile_debug
+hftmp
