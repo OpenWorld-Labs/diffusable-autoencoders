@@ -78,21 +78,25 @@ class RecTrainer(BaseTrainer):
         self.total_step_counter = save_dict['steps']
 
     def train(self):
-        torch.cuda.set_device(self.local_rank)
+        if torch.cuda.is_available():
+            device = torch.device(f'cuda:{self.local_rank}')
+            torch.cuda.set_device(device)
+        else:
+            device = torch.device('cpu')
 
         # Loss weights
-        reg_weight =  self.train_cfg.loss_weights.get('latent_reg', 0.0)
+        reg_weight = self.train_cfg.loss_weights.get('latent_reg', 0.0)
         lpips_weight = self.train_cfg.loss_weights.get('lpips', 0.0)
         se_reg_weight = self.train_cfg.loss_weights.get('se_reg', 0.0)
 
         # Prepare model, lpips, ema
-        self.model = self.model.cuda().train()
+        self.model = self.model.to(device).train()
         if self.world_size > 1:
             self.model = DDP(self.model)
 
         lpips = None
         if lpips_weight > 0.0:
-            lpips = VGGLPIPS().cuda().eval()
+            lpips = VGGLPIPS().to(device).eval()
             freeze(lpips)
 
         self.ema = EMA(
@@ -101,6 +105,11 @@ class RecTrainer(BaseTrainer):
             update_after_step = 0,
             update_every = 1
         )
+
+        # compile all training and frozen models
+        self.model = torch.compile(self.model, mode="max-autotune", fullgraph=True)
+        self.ema = torch.compile(self.ema, mode="max-autotune", fullgraph=True)
+        lpips = torch.compile(lpips, mode="max-autotune", fullgraph=True)
 
         # Set up optimizer and scheduler
         if self.train_cfg.opt.lower() == "muon":
@@ -131,7 +140,7 @@ class RecTrainer(BaseTrainer):
         for _ in range(self.train_cfg.epochs):
             for batch in loader:
                 total_loss = 0.
-                batch = batch.to('cuda').bfloat16()
+                batch = batch.to(device).bfloat16()
 
                 with ctx:
                     out = self.model(batch)

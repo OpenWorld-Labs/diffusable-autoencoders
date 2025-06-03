@@ -104,32 +104,33 @@ class DecTuneTrainer(BaseTrainer):
         self.total_step_counter = save_dict['steps']
 
     def train(self):
-        torch.cuda.set_device(self.local_rank)
+        if torch.cuda.is_available():
+            device = torch.device(f'cuda:{self.local_rank}')
+            torch.cuda.set_device(device)
+        else:
+            device = torch.device('cpu')
 
         # Loss weights
         lpips_weight = self.train_cfg.loss_weights.get('lpips', 0.0)
         gan_weight = self.train_cfg.loss_weights.get('gan', 0.1)
 
         # Prepare model, lpips, ema
-        self.model = self.model.cuda().train()
+        self.model = self.model.to(device).train()
         if self.world_size > 1:
             self.model = DDP(self.model)
         
-        self.discriminator = self.discriminator.cuda().train()
+        self.discriminator = self.discriminator.to(device).train()
         if self.world_size > 1:
             self.discriminator = DDP(self.discriminator)
         freeze(self.discriminator)
 
-        lpips = None
+        self.lpips = None
         if lpips_weight > 0.0:
-            lpips = VGGLPIPS().cuda().eval()
-            freeze(lpips)
+            self.lpips = VGGLPIPS().to(device).eval()
+            freeze(self.lpips)
 
-        self.encoder = self.encoder.cuda().bfloat16().eval()
+        self.encoder = self.encoder.to(device).bfloat16().eval()
         freeze(self.encoder)
-
-        #self.encoder = torch.compile(self.encoder, mode="max-autotune", fullgraph=True)
-        #self.lpips.model = torch.compile(self.lpips.model, mode="max-autotune", fullgraph=True)
 
         self.ema = EMA(
             self.model,
@@ -138,10 +139,17 @@ class DecTuneTrainer(BaseTrainer):
             update_every = 1
         )
 
+        # compile all training and frozen models
+        self.encoder = torch.compile(self.encoder, mode="max-autotune", fullgraph=True)
+        self.lpips = torch.compile(self.lpips, mode="max-autotune", fullgraph=True)
+        self.model = torch.compile(self.model, mode="max-autotune", fullgraph=True)
+        self.discriminator = torch.compile(self.discriminator, mode="max-autotune", fullgraph=True)
+        self.ema = torch.compile(self.ema, mode="max-autotune", fullgraph=True)
+
         # Set up optimizer and scheduler
         if self.train_cfg.opt.lower() == "muon":
-            self.opt = init_muon(self.model, rank=self.rank,world_size=self.world_size,**self.train_cfg.opt_kwargs)
-            self.d_opt = init_muon(self.discriminator, rank=self.rank,world_size=self.world_size,**self.train_cfg.opt_kwargs)
+            self.opt = init_muon(self.model, rank=self.rank, world_size=self.world_size, **self.train_cfg.opt_kwargs)
+            self.d_opt = init_muon(self.discriminator, rank=self.rank, world_size=self.world_size, **self.train_cfg.opt_kwargs)
         else:
             opt_cls = getattr(torch.optim, self.train_cfg.opt)
             self.opt = opt_cls(self.model.parameters(), **self.train_cfg.opt_kwargs)
@@ -155,7 +163,7 @@ class DecTuneTrainer(BaseTrainer):
         accum_steps = max(1, accum_steps)
 
         self.scaler = torch.amp.GradScaler()
-        ctx = torch.amp.autocast(f'cuda:{self.local_rank}', torch.bfloat16)
+        ctx = torch.amp.autocast(device, torch.bfloat16)
 
         # Timer reset
         timer = Timer()
@@ -180,9 +188,9 @@ class DecTuneTrainer(BaseTrainer):
         for _ in range(self.train_cfg.epochs):
             for batch in loader:
                 total_loss = 0.
-                batch = batch.to('cuda').bfloat16()
+                batch = batch.to(device).bfloat16()
 
-                with torch.no_grad():
+                with torch.no_grad() and ctx:
                     teacher_z = self.encoder(batch) / self.train_cfg.latent_scale
 
                 with ctx:
@@ -202,10 +210,10 @@ class DecTuneTrainer(BaseTrainer):
 
                 if lpips_weight > 0.0:
                     with ctx:
-                        lpips_loss = lpips(batch_rec, batch) / accum_steps
+                        lpips_loss = self.lpips(batch_rec, batch) / accum_steps
                     total_loss += lpips_loss
                     metrics.log('lpips_loss', lpips_loss)
-                
+
                 crnt_gan_weight = warmup_gan_weight()
                 if crnt_gan_weight > 0.0:
                     with ctx:

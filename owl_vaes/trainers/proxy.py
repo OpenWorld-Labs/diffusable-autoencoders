@@ -88,18 +88,22 @@ class ProxyTrainer(BaseTrainer):
         self.total_step_counter = save_dict['steps']
 
     def train(self):
-        torch.cuda.set_device(self.local_rank)
+        if torch.cuda.is_available():
+            device = torch.device(f'cuda:{self.local_rank}')
+            torch.cuda.set_device(device)
+        else:
+            device = torch.device('cpu')
 
         # Loss weights
-        reg_weight =  self.train_cfg.loss_weights.get('latent_reg', 0.0)
+        reg_weight = self.train_cfg.loss_weights.get('latent_reg', 0.0)
 
         # Prepare model, lpips, ema
-        self.model = self.model.cuda().train()
+        self.model = self.model.to(device).train()
         if self.world_size > 1:
             self.model = DDP(self.model, device_ids=[self.local_rank])
 
-        self.teacher = self.teacher.eval().cuda().bfloat16()
-        self.teacher.encoder = torch.compile(self.teacher.encoder, mode="max-autotune", fullgraph=True)
+        self.teacher = self.teacher.eval().to(device).bfloat16()
+        self.teacher = torch.compile(self.teacher, mode="max-autotune", fullgraph=True)
 
         self.ema = EMA(
             self.model,
@@ -107,10 +111,11 @@ class ProxyTrainer(BaseTrainer):
             update_after_step = 0,
             update_every = 1
         )
+        self.ema = torch.compile(self.ema, mode="max-autotune", fullgraph=True)
 
         # Set up optimizer and scheduler
         if self.train_cfg.opt.lower() == "muon":
-            self.opt = init_muon(self.model, rank=self.rank,world_size=self.world_size,**self.train_cfg.opt_kwargs)
+            self.opt = init_muon(self.model, rank=self.rank, world_size=self.world_size, **self.train_cfg.opt_kwargs)
         else:
             self.opt = getattr(torch.optim, self.train_cfg.opt)(self.model.parameters(), **self.train_cfg.opt_kwargs)
 
@@ -137,13 +142,13 @@ class ProxyTrainer(BaseTrainer):
         for _ in range(self.train_cfg.epochs):
             for batch in loader:
                 total_loss = 0.
-                batch = batch.to('cuda').bfloat16()
+                batch = batch.to(device).bfloat16()
 
                 with ctx:
                     batch_rec, z = self.model(batch)
 
                 with torch.no_grad(), ctx:
-                    z_teacher = self.teacher.encoder(batch.bfloat16())
+                    z_teacher = self.teacher.encoder(batch)
 
                 if reg_weight > 0:
                     reg_loss = latent_reg_loss(z) / accum_steps
