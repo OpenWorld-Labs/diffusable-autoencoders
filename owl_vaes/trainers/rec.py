@@ -19,7 +19,7 @@ from ..utils.logging import LogHelper, to_wandb
 from .base import BaseTrainer
 
 
-@torch.compile(mode="max-autotune", fullgraph=True)
+@torch.compile(mode="max-autotune")
 def latent_reg_loss(z):
     # z is [b,c,h,w]
     loss = z.pow(2)
