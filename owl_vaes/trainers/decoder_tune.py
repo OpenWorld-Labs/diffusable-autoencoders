@@ -23,7 +23,7 @@ from ..configs import Config
 def latent_reg_loss(z):
     # z is [b,c,h,w]
     loss = z.pow(2)
-    loss = Reduce('b ... -> b', reduction = 'sum')(loss).mean()
+    loss = Reduce('b c h w -> b', reduction = 'sum')(loss).mean()
     return 0.5 * loss
 
 class DecTuneTrainer(BaseTrainer):

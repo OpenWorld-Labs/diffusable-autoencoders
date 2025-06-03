@@ -27,7 +27,7 @@ def latent_reg_loss(z):
 
     # KL = -0.5 * sum(1 + logvar - z^2 - exp(logvar))
     kl = -0.5 * (1 + logvar - z.pow(2) - logvar.exp())
-    kl = Reduce('b ... -> b', reduction='sum')(kl).mean()
+    kl = Reduce('b c h w -> b', reduction='sum')(kl).mean()
     return kl
 
 
