@@ -2,7 +2,7 @@
 Trainer for reconstruction only
 """
 
-import einops as eo
+from einops.layers.torch import Reduce
 import torch
 import torch.nn.functional as F
 import wandb
@@ -21,7 +21,7 @@ from .base import BaseTrainer
 def latent_reg_loss(z):
     # z is [b,c,h,w]
     loss = z.pow(2)
-    loss = eo.reduce(loss, 'b ... -> b', reduction = 'sum').mean()
+    loss = Reduce('b ... -> b', reduction = 'sum')(loss).mean()
     return 0.5 * loss
 
 class RecTrainer(BaseTrainer):

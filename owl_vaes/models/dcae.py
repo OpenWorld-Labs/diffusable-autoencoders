@@ -1,4 +1,4 @@
-import einops as eo
+from einops.layers.torch import Rearrange, Reduce
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -6,6 +6,7 @@ from torch import nn
 from ..nn.normalization import GroupNorm
 from ..nn.resnet import DownBlock, SameBlock, UpBlock
 from ..nn.sana import ChannelToSpace, SpaceToChannel
+
 
 class Encoder(nn.Module):
     def __init__(self, config : 'ResNetConfig'):
@@ -53,7 +54,7 @@ class Encoder(nn.Module):
         x = self.final(x) + x
 
         res = x.clone()
-        res = eo.reduce(res, 'b (rep c) h w -> b c h w', rep = self.avg_factor, reduction = 'mean')
+        res = eo.layers.torchreduce(res, 'b (rep c) h w -> b c h w', rep = self.avg_factor, reduction = 'mean')
         x = self.conv_out(x) + res
 
         return x
@@ -141,6 +142,7 @@ class DCAE(nn.Module):
 def dcae_test():
     from ..configs import ResNetConfig
 
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     cfg = ResNetConfig(
         sample_size=256,
         channels=3,
@@ -153,9 +155,9 @@ def dcae_test():
         decoder_blocks_per_stage = [2,2,2,2]
     )
 
-    model = DCAE(cfg).bfloat16().cuda()
+    model = DCAE(cfg).bfloat16().to(device)
     with torch.no_grad():
-        x = torch.randn(1, 3, 256, 256).bfloat16().cuda()
+        x = torch.randn(1, 3, 256, 256).bfloat16().to(device)
         rec, z, down_rec = model(x)
         assert rec.shape == (1, 3, 256, 256), f"Expected shape (1,3,256,256), got {rec.shape}"
         assert z.shape == (1, 4, 32, 32), f"Expected shape (1,4,32,32), got {z.shape}"

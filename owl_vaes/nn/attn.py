@@ -121,39 +121,40 @@ def attn_test():
         causal = False,
         mimetic_init = False
     )
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Test Attention layer
-    attn = Attn(cfg).bfloat16().cuda()
+    attn = Attn(cfg).bfloat16().to(device)
     with torch.no_grad():
-        x = torch.randn(1, 256, 384).bfloat16().cuda()
+        x = torch.randn(1, 256, 384).bfloat16().to(device)
         y = attn(x)
         assert y.shape == (1, 256, 384), f"Expected shape (1,256,384), got {y.shape}"
 
     # Test Transformer layer
-    transformer = Transformer(cfg).bfloat16().cuda()
+    transformer = Transformer(cfg).bfloat16().to(device)
     with torch.no_grad():
-        x = torch.randn(1, 256, 384).bfloat16().cuda()
+        x = torch.randn(1, 256, 384).bfloat16().to(device)
         y = transformer(x)
         assert y.shape == (1, 256, 384), f"Expected shape (1,256,384), got {y.shape}"
 
     # Test StackedTransformer
-    stacked = StackedTransformer(cfg).bfloat16().cuda()
+    stacked = StackedTransformer(cfg).bfloat16().to(device)
     with torch.no_grad():
-        x = torch.randn(1, 256, 384).bfloat16().cuda()
+        x = torch.randn(1, 256, 384).bfloat16().to(device)
         y = stacked(x)
         assert y.shape == (1, 256, 384), f"Expected shape (1,256,384), got {y.shape}"
 
     # Test PatchProjIn
-    patch_in = PatchProjIn(384, 32, 1).bfloat16().cuda()
+    patch_in = PatchProjIn(384, 32, 1).bfloat16().to(device)
     with torch.no_grad():
-        x = torch.randn(1, 32, 16, 16).bfloat16().cuda()
+        x = torch.randn(1, 32, 16, 16).bfloat16().to(device)
         y = patch_in(x)
         assert y.shape == (1, 256, 384), f"Expected shape (1,256,384), got {y.shape}"
 
     # Test PatchProjOut
-    patch_out = PatchProjOut(16, 384, 32, 1).bfloat16().cuda()
+    patch_out = PatchProjOut(16, 384, 32, 1).bfloat16().to(device)
     with torch.no_grad():
-        x = torch.randn(1, 256, 384).bfloat16().cuda()
+        x = torch.randn(1, 256, 384).bfloat16().to(device)
         y = patch_out(x)
         assert y.shape == (1, 32, 16, 16), f"Expected shape (1,32,16,16), got {y.shape}"
 

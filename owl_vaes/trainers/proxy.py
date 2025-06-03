@@ -2,7 +2,7 @@
 Trainer for proxy models
 """
 
-import einops as eo
+from einops.layers.torch import Reduce
 import torch
 import torch.nn.functional as F
 import wandb
@@ -18,6 +18,7 @@ from ..utils import Timer, versatile_load
 from ..utils.logging import LogHelper, to_wandb
 from .base import BaseTrainer
 
+
 def latent_reg_loss(z):
     # z is [b,c,h,w]
     # KL divergence between N(z, 0.1) and N(0,1)
@@ -26,7 +27,7 @@ def latent_reg_loss(z):
 
     # KL = -0.5 * sum(1 + logvar - mu^2 - exp(logvar))
     kl = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp())
-    kl = eo.reduce(kl, 'b ... -> b', reduction='sum').mean()
+    kl = Reduce('b ... -> b', reduction='sum')(kl).mean()
     return kl
 
 class ProxyTrainer(BaseTrainer):
