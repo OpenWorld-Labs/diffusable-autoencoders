@@ -126,10 +126,10 @@ class DecTuneTrainer(BaseTrainer):
 
         self.lpips = None
         if lpips_weight > 0.0:
-            self.lpips = VGGLPIPS().to(device).eval()
+            self.lpips = VGGLPIPS().eval().to(device)
             freeze(self.lpips)
 
-        self.encoder = self.encoder.to(device).bfloat16().eval()
+        self.encoder = self.encoder.bfloat16().eval().to(device)
         freeze(self.encoder)
 
         self.ema = EMA(
@@ -188,7 +188,7 @@ class DecTuneTrainer(BaseTrainer):
         for _ in range(self.train_cfg.epochs):
             for batch in loader:
                 total_loss = 0.
-                batch = batch.to(device).bfloat16()
+                batch = batch.bfloat16().to(device)
 
                 with torch.no_grad() and ctx:
                     teacher_z = self.encoder(batch) / self.train_cfg.latent_scale
@@ -196,7 +196,7 @@ class DecTuneTrainer(BaseTrainer):
                 with ctx:
                     batch_rec = self.model(teacher_z)
 
-                # Discriminator training 
+                # Discriminator training
                 unfreeze(self.discriminator)
                 with ctx:
                     disc_loss = self.discriminator(batch_rec.detach(), batch.detach()) / accum_steps
@@ -204,22 +204,23 @@ class DecTuneTrainer(BaseTrainer):
                 self.scaler.scale(disc_loss).backward()
                 freeze(self.discriminator)
 
-                mse_loss = F.mse_loss(batch_rec, batch) / accum_steps
-                total_loss += mse_loss
+                with ctx:
+                    mse_loss = F.mse_loss(batch_rec, batch) / accum_steps
+                    total_loss += mse_loss
                 metrics.log('mse_loss', mse_loss)
 
                 if lpips_weight > 0.0:
                     with ctx:
                         lpips_loss = self.lpips(batch_rec, batch) / accum_steps
-                    total_loss += lpips_loss
+                        total_loss += lpips_loss
                     metrics.log('lpips_loss', lpips_loss)
 
                 crnt_gan_weight = warmup_gan_weight()
                 if crnt_gan_weight > 0.0:
                     with ctx:
                         gan_loss = self.discriminator(batch_rec) / accum_steps
+                        total_loss += crnt_gan_weight * gan_loss
                     metrics.log('gan_loss', gan_loss)
-                    total_loss += crnt_gan_weight * gan_loss
 
                 self.scaler.scale(total_loss).backward()
 
@@ -228,21 +229,21 @@ class DecTuneTrainer(BaseTrainer):
                     # Updates
                     self.scaler.unscale_(self.opt)
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-
                     self.scaler.unscale_(self.d_opt)
                     torch.nn.utils.clip_grad_norm_(self.discriminator.parameters(), max_norm=1.0)
 
                     self.scaler.step(self.opt)
                     self.opt.zero_grad(set_to_none=True)
-
                     self.scaler.step(self.d_opt)
                     self.d_opt.zero_grad(set_to_none=True)
-                    
+
                     self.scaler.update()
 
                     if self.scheduler is not None:
                         self.scheduler.step()
-                    self.ema.update()
+
+                    with ctx:
+                        self.ema.update()
 
                     # Do logging stuff with sampling stuff in the middle
                     with torch.no_grad():
@@ -254,11 +255,13 @@ class DecTuneTrainer(BaseTrainer):
                         if self.total_step_counter % self.train_cfg.sample_interval == 0:
                             with ctx:
                                 ema_rec = self.ema.ema_model(teacher_z)
+
                             wandb_dict['samples'] = to_wandb(
                                 batch.detach().contiguous().bfloat16(),
                                 ema_rec.detach().contiguous().bfloat16(),
                                 gather = False
                             )
+
                         if self.rank == 0:
                             wandb.log(wandb_dict)
 

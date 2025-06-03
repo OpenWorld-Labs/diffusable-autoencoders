@@ -54,7 +54,7 @@ def load_proxy_model(
     
     # Initialize combined model
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = CombinedModule(t_cfg, r_cfg).to(device).bfloat16()
+    model = CombinedModule(t_cfg, r_cfg).bfloat16().to(device)
     
     # Load checkpoints
     model.load_ckpt(t_ckpt_path, r_ckpt_path)

@@ -9,6 +9,10 @@ from owl_vaes.utils.ddp import cleanup, setup
 if __name__ == "__main__":
     # torch compile flag to convert conv with 1x1 kernel to matrix multiplication
     torch._inductor.config.conv_1x1_as_mm = True
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cuda.matmul.allow_fp16_accumulation = True
+    torch.backends.cudnn.benchmark = True
+
 
     parser = argparse.ArgumentParser()
 

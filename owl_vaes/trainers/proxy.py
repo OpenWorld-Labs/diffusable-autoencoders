@@ -19,16 +19,17 @@ from ..utils.logging import LogHelper, to_wandb
 from .base import BaseTrainer
 
 
+@torch.compile(mode="max-autotune", fullgraph=True)
 def latent_reg_loss(z):
     # z is [b,c,h,w]
     # KL divergence between N(z, 0.1) and N(0,1)
-    mu = z
     logvar = 2 * torch.log(torch.tensor(0.1))  # log(0.1^2)
 
-    # KL = -0.5 * sum(1 + logvar - mu^2 - exp(logvar))
-    kl = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp())
+    # KL = -0.5 * sum(1 + logvar - z^2 - exp(logvar))
+    kl = -0.5 * (1 + logvar - z.pow(2) - logvar.exp())
     kl = Reduce('b ... -> b', reduction='sum')(kl).mean()
     return kl
+
 
 class ProxyTrainer(BaseTrainer):
     """
@@ -103,7 +104,7 @@ class ProxyTrainer(BaseTrainer):
         if self.world_size > 1:
             self.model = DDP(self.model, device_ids=[self.local_rank])
 
-        self.teacher = self.teacher.eval().to(device).bfloat16()
+        self.teacher = self.teacher.eval().bfloat16().to(device)
         self.teacher = torch.compile(self.teacher, mode="max-autotune", fullgraph=True)
 
         self.ema = EMA(
@@ -143,7 +144,7 @@ class ProxyTrainer(BaseTrainer):
         for _ in range(self.train_cfg.epochs):
             for batch in loader:
                 total_loss = 0.
-                batch = batch.to(device).bfloat16()
+                batch = batch.bfloat16().to(device)
 
                 with ctx:
                     batch_rec, z = self.model(batch)
@@ -152,12 +153,14 @@ class ProxyTrainer(BaseTrainer):
                     z_teacher = self.teacher.encoder(batch)
 
                 if reg_weight > 0:
-                    reg_loss = latent_reg_loss(z) / accum_steps
-                    total_loss += reg_loss * reg_weight
+                    with ctx:
+                        reg_loss = latent_reg_loss(z) / accum_steps
+                        total_loss += reg_loss * reg_weight
                     metrics.log('reg_loss', reg_loss)
 
-                mse_loss = F.mse_loss(batch_rec, z_teacher) / accum_steps
-                total_loss += mse_loss
+                with ctx:
+                    mse_loss = F.mse_loss(batch_rec, z_teacher) / accum_steps
+                    total_loss += mse_loss
                 metrics.log('mse_loss', mse_loss)
 
                 self.scaler.scale(total_loss).backward()
@@ -181,7 +184,9 @@ class ProxyTrainer(BaseTrainer):
 
                     if self.scheduler is not None:
                         self.scheduler.step()
-                    self.ema.update()
+
+                    with ctx:
+                        self.ema.update()
 
                     # Do logging stuff with sampling stuff in the middle
                     with torch.no_grad():
@@ -192,6 +197,7 @@ class ProxyTrainer(BaseTrainer):
                         if self.total_step_counter % self.train_cfg.sample_interval == 0:
                             with ctx:
                                 batch_rec = self.teacher.decoder(batch_rec.bfloat16())
+
                             wandb_dict['samples'] = to_wandb(
                                 batch.detach().contiguous().bfloat16(),
                                 batch_rec.detach().contiguous().bfloat16(),
