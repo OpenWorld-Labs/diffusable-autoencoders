@@ -38,7 +38,7 @@ class R3GANDiscriminator(nn.Module):
 
         self.final = nn.Conv2d(ch_max, 1, 4, 1, 0)
 
-    def _forward(self, x):
+    def forward(self, x):
         # Forward on single sample
         x = self.conv_in(x)
         x = self.blocks(x)
@@ -46,19 +46,7 @@ class R3GANDiscriminator(nn.Module):
         x = x.flatten(0)
         return x
 
-    def forward(self, x_fake, x_real = None):
-        if x_real is None:
-            return -self._forward(x_fake).mean()
-        else:
-            fake_out = self._forward(x_fake)
-            real_out = self._forward(x_real)
-
-            fake_loss = F.relu(1 + fake_out).mean()
-            real_loss = F.relu(1 - real_out).mean()
-
-            return fake_loss + real_loss
-
-def r3gandiscriminator_test():
+if __name__ == "__main__":
     from dataclasses import dataclass
 
     @dataclass
@@ -67,14 +55,9 @@ def r3gandiscriminator_test():
         ch_0:int= 32
         ch_max:int= 256
         blocks_per_stage:int= 2
-        
-    model = R3GANDiscriminator(DummyConfig()).bfloat16().cuda()
-    with torch.no_grad():
-        x = torch.randn(1,3,256,256).bfloat16().cuda()
-        y = model._forward(x)
-        assert y.shape == (1,), f"Expected shape (1,), got {y.shape}"
-    print("Test passed!")
-    
-if __name__ == "__main__":
-    r3gandiscriminator_test()
 
+    model = R3GANDiscriminator(DummyConfig()).bfloat16().to(device)
+    with torch.no_grad():
+        x = torch.randn(1,3,256,256).bfloat16().to(device)
+        y = model.forward(x)
+        print(y.shape)

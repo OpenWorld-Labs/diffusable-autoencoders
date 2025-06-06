@@ -6,6 +6,10 @@ Hard-coded for Proxy TiToK + DCAE for now
 import torch
 from torch import nn
 
+<<<<<<< HEAD
+from ..utils.get_device import DeviceManager
+=======
+>>>>>>> main
 from ..configs import Config
 from ..models.dcae import Decoder
 from ..models.proxy_titok import ProxyTiToKVAE

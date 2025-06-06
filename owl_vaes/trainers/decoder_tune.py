@@ -14,11 +14,12 @@ from ..models import get_model_cls
 from ..discriminators import get_discriminator_cls
 from ..muon import init_muon
 from ..nn.lpips import VGGLPIPS
+from ..nn.realtivistic_loss import gan_loss_with_approximate_penalties
 from ..schedulers import get_scheduler_cls
 from ..utils import Timer, freeze, unfreeze, versatile_load
 from ..utils.logging import LogHelper, to_wandb
-from .base import BaseTrainer
 from ..configs import Config
+from .base import BaseTrainer
 
 def latent_reg_loss(z):
     # z is [b,c,h,w]
@@ -191,7 +192,7 @@ class DecTuneTrainer(BaseTrainer):
                 # Discriminator training 
                 unfreeze(self.discriminator)
                 with ctx:
-                    disc_loss = self.discriminator(batch_rec.detach(), batch.detach()) / accum_steps
+                    disc_loss = gan_loss_with_approximate_penalties(self.discriminator, batch.detach(), batch_rec.detach(), discriminator_turn=True) / accum_steps
                 metrics.log('disc_loss', disc_loss)
                 self.scaler.scale(disc_loss).backward()
                 freeze(self.discriminator)

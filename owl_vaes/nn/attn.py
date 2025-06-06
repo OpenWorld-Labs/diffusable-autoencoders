@@ -3,7 +3,8 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from owl_vaes.configs import TransformerConfig
+from ..utils.get_device import DeviceManager
+from ..configs import TransformerConfig
 
 from .mimetic import mimetic_init
 from .mlp import MLP

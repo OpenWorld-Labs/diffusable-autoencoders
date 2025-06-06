@@ -3,12 +3,13 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+from ..configs import ResNetConfig
 from ..nn.normalization import GroupNorm
 from ..nn.resnet import DownBlock, SameBlock, UpBlock
 from ..nn.sana import ChannelToSpace, SpaceToChannel
 
 class Encoder(nn.Module):
-    def __init__(self, config : 'ResNetConfig'):
+    def __init__(self, config: ResNetConfig):
         super().__init__()
 
         size = config.sample_size
@@ -59,7 +60,7 @@ class Encoder(nn.Module):
         return x
 
 class Decoder(nn.Module):
-    def __init__(self, config : 'ResNetConfig'):
+    def __init__(self, config: ResNetConfig):
         super().__init__()
 
         size = config.sample_size
@@ -116,7 +117,7 @@ class DCAE(nn.Module):
     """
     DCAE based autoencoder that takes a ResNetConfig to configure.
     """
-    def __init__(self, config : 'ResNetConfig'):
+    def __init__(self, config: ResNetConfig):
         super().__init__()
 
         self.encoder = Encoder(config)

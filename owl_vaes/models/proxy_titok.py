@@ -4,6 +4,8 @@ import einops as eo
 import torch
 from torch import nn
 
+from ..models.titok import TiToKVAE
+from ..utils.get_device import DeviceManager
 from ..nn.attn import PatchProjIn, PatchProjOut, StackedTransformer
 from ..nn.embeddings import LearnedPosEnc
 
