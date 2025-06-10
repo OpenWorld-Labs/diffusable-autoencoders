@@ -6,6 +6,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt update && \
     apt install -y bash \
     build-essential \
+    procps \
     git \
     curl \
     ca-certificates \

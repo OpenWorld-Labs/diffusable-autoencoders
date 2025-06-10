@@ -19,7 +19,6 @@ from ..utils.logging import LogHelper, to_wandb
 from .base import BaseTrainer
 
 
-@torch.compile(mode="max-autotune")
 def latent_reg_loss(z):
     # z is [b,c,h,w]
     loss = z.pow(2)
@@ -110,7 +109,7 @@ class RecTrainer(BaseTrainer):
         )
 
         # compile all training and frozen models
-        self.model = torch.compile(self.model, mode="max-autotune", fullgraph=True)
+        # self.model = torch.compile(self.model, mode="max-autotune", fullgraph=True)
         self.ema = torch.compile(self.ema, mode="max-autotune", fullgraph=True)
         lpips = torch.compile(lpips, mode="max-autotune", fullgraph=True)
 
