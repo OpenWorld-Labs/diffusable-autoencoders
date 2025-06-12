@@ -51,4 +51,6 @@ explicit = true
 [tool.uv.sources]
 lpips = { git = "https://github.com/shahbuland/PerceptualSimilarity" }
 torch = { index = "pytorch" }
+torchvision = { index = "pytorch" }
+torchaudio = { index = "pytorch" }
 owl-vae = { workspace = true }

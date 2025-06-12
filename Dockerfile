@@ -25,7 +25,6 @@ COPY . /app
 WORKDIR /app
 
 RUN uv venv
-RUN uv lock
 RUN uv sync
 
-CMD ["/bin/bash"]
+CMD ["/bin/bash", "-c", "source .venv/bin/activate && /bin/bash"]

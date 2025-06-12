@@ -1,11 +1,10 @@
 wandb/
-uv.lock
+**wandb
+*.wandb
 .DS_Store
 *DS_Store
 **DS_Store
 *.eqx
-**wandb
-*.wandb
 typings/
 *pyc
 *CLAUDE.md
@@ -17,3 +16,4 @@ torch_compile_debug
 hftmp
 my_data/
 **egg**
+tl_out
