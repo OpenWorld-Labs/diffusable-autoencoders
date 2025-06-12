@@ -74,12 +74,6 @@ class RecTrainer(BaseTrainer):
         self.total_step_counter = save_dict['steps']
 
     def train(self):
-        if torch.cuda.is_available():
-            self.device = torch.device(f'cuda:{self.local_rank}')
-            torch.cuda.set_device(self.device)
-        else:
-            self.device = torch.device('cpu')
-
         # Loss weights
         reg_weight = self.train_cfg.loss_weights.get('latent_reg', 0.0)
         lpips_weight = self.train_cfg.loss_weights.get('lpips', 0.0)

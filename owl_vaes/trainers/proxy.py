@@ -89,21 +89,15 @@ class ProxyTrainer(BaseTrainer):
         self.total_step_counter = save_dict['steps']
 
     def train(self):
-        if torch.cuda.is_available():
-            device = torch.device(f'cuda:{self.local_rank}')
-            torch.cuda.set_device(device)
-        else:
-            device = torch.device('cpu')
-
         # Loss weights
         reg_weight = self.train_cfg.loss_weights.get('latent_reg', 0.0)
 
         # Prepare model, lpips, ema
-        self.model = self.model.to(device).train()
+        self.model = self.model.to(self.device).train()
         if self.world_size > 1:
             self.model = DDP(self.model, device_ids=[self.local_rank])
 
-        self.teacher = self.teacher.eval().bfloat16().to(device)
+        self.teacher = self.teacher.eval().bfloat16().to(self.device)
         self.teacher = torch.compile(self.teacher, mode="max-autotune", fullgraph=True)
 
         self.ema = EMA(
@@ -143,7 +137,7 @@ class ProxyTrainer(BaseTrainer):
         for _ in range(self.train_cfg.epochs):
             for batch in loader:
                 total_loss = 0.
-                batch = batch.bfloat16().to(device)
+                batch = batch.bfloat16().to(self.device)
 
                 with ctx:
                     batch_rec, z = self.model(batch)

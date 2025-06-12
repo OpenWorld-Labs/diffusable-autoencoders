@@ -109,12 +109,6 @@ class DecTuneTrainer(BaseTrainer):
         self.total_step_counter = save_dict['steps']
 
     def train(self):
-        if torch.cuda.is_available():
-            device = torch.device(f'cuda:{self.local_rank}')
-            torch.cuda.set_device(device)
-        else:
-            device = torch.device('cpu')
-
         # Loss weights
         lpips_weight = self.train_cfg.loss_weights.get('lpips', 0.0)
         gan_weight = self.train_cfg.loss_weights.get('gan', 0.1)
