@@ -12,10 +12,8 @@ if __name__ == "__main__":
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cuda.matmul.allow_fp16_accumulation = True
     torch.backends.cudnn.benchmark = True
-    # # our LogHelper uses direct tensor data (scalar) access with .item() so this makes torch dynamo try and optimize it.^M
-    # torch._dynamo.config.capture_scalar_outputs = ^M
-    # enable if logging doesn't happen with different shape tensors, otherwise recompilation adds overhead.^M
-
+    # enable below if logging (.item call in LogHelper) doesn't happen with dynamic shape tensors, otherwise recompilation adds overhead.
+    # torch._dynamo.config.capture_scalar_outputs = True
 
     parser = argparse.ArgumentParser()
 
