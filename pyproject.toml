@@ -43,12 +43,10 @@ dev = [
     "skypilot[runpod]>=0.9.3",
 ]
 
-[[tool.pip.index]]
-url = "https://download.pytorch.org/whl/cu128"
-
 [[tool.uv.index]]
 name = "pytorch"
 url = "https://download.pytorch.org/whl/cu128"
+explicit = true
 
 [tool.uv.sources]
 lpips = { git = "https://github.com/shahbuland/PerceptualSimilarity" }

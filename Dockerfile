@@ -24,12 +24,8 @@ RUN apt update && \
 COPY . /app
 WORKDIR /app
 
-RUN /bin/bash -c "uv venv && \
-    uv pip install ."
+RUN uv venv
+RUN uv lock
+RUN uv sync
 
-ARG DEV_MODE=false
-RUN if [ "$DEV_MODE" = "true" ] ; then \
-    /bin/bash -c "uv pip install -e '.[dev]'" ; \
-    fi
-
-CMD ["/bin/bash", "-c", "source .venv/bin/activate && /bin/bash"]
+CMD ["/bin/bash"]

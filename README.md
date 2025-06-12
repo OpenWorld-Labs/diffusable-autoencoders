@@ -42,16 +42,6 @@ pre-commit run --all-files
 - See existing configs under `configs` directory for examples.
 
 ## Run with Docker:
-For dev mode:
-```
-docker build \
-  --build-arg DEV_MODE=true \
-  -t owl_vaes:dev .
-
-docker run --gpus all -it owl_vaes:dev /bin/bash
-```
-
-Without dev dependencies:
 ```
 docker build \
   -t owl_vaes:latest .
