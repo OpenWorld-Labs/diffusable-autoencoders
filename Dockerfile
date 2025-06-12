@@ -27,7 +27,4 @@ WORKDIR /app
 RUN uv venv
 RUN uv sync
 
-# copy git user details from host machine
-COPY ~/.gitconfig ~/
-
 CMD ["/bin/bash", "-c", "source .venv/bin/activate && /bin/bash"]
