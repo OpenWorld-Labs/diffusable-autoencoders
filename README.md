@@ -43,7 +43,7 @@ pre-commit run --all-files
 
 ## Run with Docker:
 ```
-docker build -t owl_vaes:latest .
+docker build -t owl_vaes .
 
-docker run --gpus all -it owl_vaes:latest /bin/bash
+docker run --gpus all -it owl_vaes /bin/bash
 ```
