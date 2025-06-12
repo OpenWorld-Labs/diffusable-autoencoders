@@ -43,6 +43,14 @@ class RMSNorm2d(RMSNorm):
         x = x.permute(0,3,1,2)
         return x
 
+class RMSNorm1d(RMSNorm):
+    def forward(self, x):
+        b,d,n = x.shape
+        gain = self.gain[None,:,None]
+        gain = (1. + gain)
+        rms = (x.float().pow(2).mean(-1,keepdim=True)+1.0e-6).rsqrt().to(x.dtype)
+        return x * rms * gain
+
 class QKNorm(nn.Module):
     def __init__(self, dim):
         super().__init__()

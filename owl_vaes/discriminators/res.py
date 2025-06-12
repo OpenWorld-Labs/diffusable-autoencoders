@@ -30,34 +30,30 @@ class R3GANDiscriminator(nn.Module):
             next_ch = min(ch*2,ch_max)
 
             blocks.append(DownBlock(ch, next_ch, blocks_per_stage, total_blocks))
+
+
             ch = next_ch
             size = size // 2
+    
+            if size == 45:
+                size = 64
 
         blocks.append(SameBlock(ch, ch_max, blocks_per_stage, total_blocks))
-        self.blocks = nn.Sequential(*blocks)
+        self.blocks = nn.ModuleList(blocks)
 
         self.final = nn.Conv2d(ch_max, 1, 4, 1, 0)
 
-    def _forward(self, x):
+    def forward(self, x):
         # Forward on single sample
         x = self.conv_in(x)
-        x = self.blocks(x)
+        for block in self.blocks:
+            x = block(x)
+            x = self.cond(x)
+
         x = self.final(x)
         x = x.flatten(0)
         return x
-
-    def forward(self, x_fake, x_real = None):
-        if x_real is None:
-            return -self._forward(x_fake).mean()
-        else:
-            fake_out = self._forward(x_fake)
-            real_out = self._forward(x_real)
-
-            fake_loss = F.relu(1 + fake_out).mean()
-            real_loss = F.relu(1 - real_out).mean()
-
-            return fake_loss + real_loss
-
+        
 def r3gandiscriminator_test():
     from dataclasses import dataclass
 

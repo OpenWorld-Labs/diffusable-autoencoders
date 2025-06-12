@@ -114,6 +114,10 @@ class PatchProjOut(nn.Module):
 
         return x
 
+# ===== Conv ATTN =====
+
+# TODO, replace my own deleted code
+
 def attn_test():
     cfg = TransformerConfig(
         sample_size = 16,

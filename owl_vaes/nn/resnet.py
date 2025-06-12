@@ -1,11 +1,16 @@
 from torch import nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint as torch_checkpoint
 
 from .normalization import RMSNorm2d, GroupNorm
 
 """
 Building blocks for any ResNet based model
 """
+
+def checkpoint(function, *args, **kwargs):
+    kwargs.setdefault("use_reentrant", False)
+    return torch_checkpoint(function, *args, **kwargs)
 
 class ResBlock(nn.Module):
     """
@@ -48,13 +53,21 @@ class ResBlock(nn.Module):
 
     def forward(self, x):
         res = x.clone()
-        x = self.conv1(x)
-        x = self.norm1(x)
-        x = self.act1(x)
-        x = self.conv2(x)
-        x = self.norm2(x)
-        x = self.act2(x)
-        x = self.conv3(x)
+
+        def _inner(x):
+            x = self.conv1(x)
+            x = self.norm1(x)
+            x = self.act1(x)
+            x = self.conv2(x)
+            x = self.norm2(x)
+            x = self.act2(x)
+            x = self.conv3(x)
+            return x
+
+        if self.training:
+            x = checkpoint(_inner, x)
+        else:
+            x = _inner(x)
 
         return x + res
 
@@ -142,4 +155,39 @@ class SameBlock(nn.Module):
     def forward(self, x):
         for block in self.blocks:
             x = block(x)
+        return x
+    
+class LandscapeToSquare(nn.Module):
+    def __init__(self, ch):
+        super().__init__()
+
+        self.proj = nn.Conv2d(ch, ch, 3, 1, 1, bias = False)
+    
+    def forward(self, x):
+        # x is [9, 16]
+        _,_,h,w = x.shape
+
+        h_mult = (512/360)
+        w_mult = (512/640)
+
+        new_h = round(h * h_mult)
+        new_w = round(w * w_mult)
+
+        x = F.interpolate(x, (new_h, new_w), mode='bicubic')
+        x = self.proj(x)
+        return x
+
+class SquareToLandscape(LandscapeToSquare):
+    def forward(self, x):
+        # x is [1,1]
+        _,_,h,w = x.shape
+
+        h_mult = (360/512)
+        w_mult = (640/512)
+
+        new_h = round(h*h_mult)
+        new_w = round(w*w_mult)
+
+        x = self.proj(x)
+        x = F.interpolate(x, (new_h, new_w), mode='bicubic')
         return x

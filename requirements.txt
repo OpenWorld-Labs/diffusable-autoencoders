@@ -10,3 +10,4 @@ kornia
 datasets
 huggingface-hub
 python-dotenv
+git+https://github.com/sypsyp97/convnext_perceptual_loss

@@ -12,18 +12,12 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from ..data import get_loader
 from ..models import get_model_cls
 from ..muon import init_muon
-from ..nn.lpips import VGGLPIPS
+from ..nn.lpips import get_lpips_cls
 from ..schedulers import get_scheduler_cls
 from ..utils import Timer, freeze
 from ..utils.logging import LogHelper, to_wandb
 from .base import BaseTrainer
-
-
-def latent_reg_loss(z):
-    # z is [b,c,h,w]
-    loss = z.pow(2)
-    loss = Reduce('b c h w -> b', reduction = 'sum')(loss).mean()
-    return 0.5 * loss
+from ..losses.basic import latent_reg_loss
 
 
 class RecTrainer(BaseTrainer):
@@ -81,10 +75,10 @@ class RecTrainer(BaseTrainer):
 
     def train(self):
         if torch.cuda.is_available():
-            device = torch.device(f'cuda:{self.local_rank}')
-            torch.cuda.set_device(device)
+            self.device = torch.device(f'cuda:{self.local_rank}')
+            torch.cuda.set_device(self.device)
         else:
-            device = torch.device('cpu')
+            self.device = torch.device('cpu')
 
         # Loss weights
         reg_weight = self.train_cfg.loss_weights.get('latent_reg', 0.0)
@@ -92,13 +86,13 @@ class RecTrainer(BaseTrainer):
         se_reg_weight = self.train_cfg.loss_weights.get('se_reg', 0.0)
 
         # Prepare model, lpips, ema
-        self.model = self.model.to(device).train()
+        self.model = self.model.to(self.device).train()
         if self.world_size > 1:
             self.model = DDP(self.model)
 
         lpips = None
         if lpips_weight > 0.0:
-            lpips = VGGLPIPS().to(device).eval()
+            lpips = get_lpips_cls(self.train_cfg.lpips_type)(self.device).to(self.device).eval()
             freeze(lpips)
 
         self.ema = EMA(
@@ -142,7 +136,7 @@ class RecTrainer(BaseTrainer):
         for _ in range(self.train_cfg.epochs):
             for batch in loader:
                 total_loss = 0.
-                batch = batch.bfloat16().to(device)
+                batch = batch.bfloat16().to(self.device)
 
                 with ctx:
                     out = self.model(batch)
@@ -150,7 +144,6 @@ class RecTrainer(BaseTrainer):
                         batch_rec, z = out
                     elif len(out) == 3:
                         batch_rec, z, down_rec = out
-
                 if reg_weight > 0:
                     with ctx:
                         reg_loss = latent_reg_loss(z) / accum_steps

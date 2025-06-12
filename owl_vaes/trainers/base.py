@@ -2,16 +2,19 @@
 Base class for any trainer
 """
 
-import torch
-import wandb
 import os
+
+import torch
 import torch.distributed as dist
+import wandb
+
 
 class BaseTrainer:
     def __init__(
         self,
         train_cfg, logging_cfg, model_cfg,
-        global_rank = 0, local_rank = 0, world_size = 1
+        global_rank = 0, local_rank = 0, world_size = 1,
+        device = None
     ):
         self.rank = global_rank
         self.local_rank = local_rank
@@ -21,23 +24,27 @@ class BaseTrainer:
         self.logging_cfg = logging_cfg
         self.model_cfg = model_cfg
 
+        if device is None:
+            device = f'cuda:{local_rank}'
+        self.device = device
+        
         if self.logging_cfg is not None and self.rank == 0:
             log = self.logging_cfg
             wandb.init(
-                project = log.project,
-                entity = log.name,
-                name = log.run_name,
-                config = {
-                    'train' : train_cfg,
-                    'model' : model_cfg
-                }
+                project=log.project,
+                entity=log.name,
+                name=log.run_name,
+                config={"train": train_cfg, "model": model_cfg},
             )
+
+        if 'cuda' in self.device:
+            torch.cuda.set_device(self.local_rank)
 
     def barrier(self):
         if self.world_size > 1:
             dist.barrier()
 
-    def get_module(self, ema = False):
+    def get_module(self, ema: bool = False):
         if self.world_size == 1:
             if ema:
                 return self.ema.ema_model
@@ -50,9 +57,13 @@ class BaseTrainer:
                 return self.model.module
 
     def save(self, save_dict):
-        os.makedirs(self.train_cfg.checkpoint_dir, exist_ok = True)
-        fp = os.path.join(self.train_cfg.checkpoint_dir, f"step_{self.total_step_counter}.pt")
+        os.makedirs(self.train_cfg.checkpoint_dir, exist_ok=True)
+
+        fp = os.path.join(
+            self.train_cfg.checkpoint_dir, f"step_{self.total_step_counter}.pt"
+        )
+
         torch.save(save_dict, fp)
 
-    def load(self, path):
-        return torch.load(path, map_location = 'cpu', weights_only=False)
+    def load(self, path: str):
+        return torch.load(path, map_location="cpu", weights_only=False)

@@ -13,7 +13,7 @@ from ..data import get_loader
 from ..models import get_model_cls
 from ..discriminators import get_discriminator_cls
 from ..muon import init_muon
-from ..nn.lpips import VGGLPIPS
+from ..nn.lpips import get_lpips_cls
 from ..schedulers import get_scheduler_cls
 from ..utils import Timer, freeze, unfreeze, versatile_load
 from ..utils.logging import LogHelper, to_wandb
@@ -51,13 +51,17 @@ class DecTuneTrainer(BaseTrainer):
         teacher = get_model_cls(teacher_cfg.model_id)(teacher_cfg)
         teacher.load_state_dict(teacher_ckpt)
 
-        del teacher.decoder
         self.encoder = teacher.encoder
 
-        model_id = self.model_cfg.model_id
-        model = get_model_cls(model_id)(self.model_cfg)
-        del model.encoder
-        self.model = model.decoder
+        if self.train_cfg.use_teacher_decoder:
+            self.model = teacher.decoder
+            self.model.decoder_only = True
+        else:
+            del teacher.decoder
+            model_id = self.model_cfg.model_id
+            model = get_model_cls(model_id)(self.model_cfg)
+            del model.encoder
+            self.model = model.decoder
 
         disc_cfg = self.model_cfg.discriminator
         self.discriminator = get_discriminator_cls(disc_cfg.model_id)(disc_cfg)
@@ -114,24 +118,28 @@ class DecTuneTrainer(BaseTrainer):
         # Loss weights
         lpips_weight = self.train_cfg.loss_weights.get('lpips', 0.0)
         gan_weight = self.train_cfg.loss_weights.get('gan', 0.1)
+        r12_weight = self.train_cfg.loss_weights.get('r12', 0.0)
 
         # Prepare model, lpips, ema
-        self.model = self.model.to(device).train()
+        self.model = self.model.to(self.device).train()
         if self.world_size > 1:
             self.model = DDP(self.model)
         
-        self.discriminator = self.discriminator.to(device).train()
+        self.discriminator = self.discriminator.to(self.device).train()
         if self.world_size > 1:
             self.discriminator = DDP(self.discriminator)
         freeze(self.discriminator)
 
         self.lpips = None
         if lpips_weight > 0.0:
-            self.lpips = VGGLPIPS().eval().to(device)
-            freeze(self.lpips)
+            lpips = get_lpips_cls(self.train_cfg.lpips_id)(self.device).to(self.device).eval()
+            freeze(lpips)
 
-        self.encoder = self.encoder.bfloat16().eval().to(device)
+        self.encoder = self.encoder.to(self.device).bfloat16().eval()
         freeze(self.encoder)
+
+        self.encoder = torch.compile(self.encoder)
+        #self.lpips.model = torch.compile(self.lpips.model)
 
         self.ema = EMA(
             self.model,
@@ -164,7 +172,9 @@ class DecTuneTrainer(BaseTrainer):
         accum_steps = max(1, accum_steps)
 
         self.scaler = torch.amp.GradScaler()
-        ctx = torch.amp.autocast(device, torch.bfloat16)
+        ctx = torch.amp.autocast(self.device, torch.bfloat16)
+
+        self.load()
 
         # Timer reset
         timer = Timer()
@@ -180,28 +190,82 @@ class DecTuneTrainer(BaseTrainer):
             if self.total_step_counter < self.train_cfg.delay_adv:
                 return 0.0
             else:
-                ramp = (self.total_step_counter - self.train_cfg.delay_adv) / self.train_cfg.warmup_adv
-                ramp = max(0.0, ramp)
-                ramp = min(1.0, ramp)
-                return ramp * gan_weight
+                x = (self.total_step_counter - self.train_cfg.delay_adv) / self.train_cfg.warmup_adv
+                x = max(0.0, min(1.0, x))
+                # Cosine annealing from 0 to 1
+                ramp = 0.5 * (1 - torch.cos(torch.tensor(x * torch.pi)).item())
+                return ramp * gan_weight  
+
+        def r_loss(d, x, sigma = 0.01):
+            z = sigma * torch.randn_like(x)
+            d_clean = d(x.detach())
+            d_noisy = d(x.detach() + z)
+
+            return ((d_clean - d_noisy).pow(2).mean())
+        
+        def d_loss(d, x_fake, x_real):
+            fake_out = d(x_fake)
+            real_out = d(x_real)
+
+            fake_loss = F.relu(1+fake_out).mean()
+            real_loss = F.relu(1-real_out).mean()
+
+            return fake_loss + real_loss
+
+        def g_loss(d, x_fake):
+            return -d(x_fake).mean()
+
+        def merged_d_losses(d, x_fake, x_real, sigma=0.01):
+            fake_out = d(x_fake.detach())
+            real_out = d(x_real.detach())
+
+            fake_out_noisy = d((x_fake + sigma*torch.randn_like(x_fake)).detach())
+            real_out_noisy = d((x_real + sigma*torch.randn_like(x_real)).detach())
+
+            r1_penalty = (fake_out_noisy - fake_out).pow(2).mean()
+            r2_penalty = (real_out_noisy - real_out).pow(2).mean()
+
+            fake_loss = F.relu(1 + fake_out).mean()
+            real_loss = F.relu(1 - real_out).mean()
+
+            return r1_penalty, r2_penalty, (fake_loss + real_loss)
 
         local_step = 0
         for _ in range(self.train_cfg.epochs):
             for batch in loader:
                 total_loss = 0.
-                batch = batch.bfloat16().to(device)
+                batch = batch.to(self.device).bfloat16()
 
                 with torch.no_grad() and ctx:
                     teacher_z = self.encoder(batch) / self.train_cfg.latent_scale
-
+                    teacher_z = F.interpolate(teacher_z, scale_factor=.5)
+                    batch = F.interpolate(batch, scale_factor=.5)
                 with ctx:
                     batch_rec = self.model(teacher_z)
 
                 # Discriminator training
                 unfreeze(self.discriminator)
                 with ctx:
-                    disc_loss = self.discriminator(batch_rec.detach(), batch.detach()) / accum_steps
-                metrics.log('disc_loss', disc_loss)
+                    if r12_weight == 0.0:
+                        disc_loss = d_loss(self.discriminator, batch_rec.detach(), batch.detach()) / accum_steps
+                        metrics.log('disc_loss', disc_loss)
+                    else:
+                        r1_penalty, r2_penalty, d_loss = merged_d_losses(
+                            self.discriminator, 
+                            batch_rec.detach(), 
+                            batch.detach()
+                        )
+                        r1_penalty = r1_penalty / accum_steps
+                        r2_penalty = r2_penalty / accum_steps
+                        d_loss = d_loss / accum_steps
+
+                        metrics.log('r1_penalty', r1_penalty)
+                        metrics.log('r2_penalty', r2_penalty)
+                        metrics.log('disc_loss', d_loss)
+
+                        disc_loss = d_loss + (r1_penalty + r2_penalty) * 0.5 * r12_weight
+
+
                 self.scaler.scale(disc_loss).backward()
                 freeze(self.discriminator)
 
@@ -219,9 +283,9 @@ class DecTuneTrainer(BaseTrainer):
                 crnt_gan_weight = warmup_gan_weight()
                 if crnt_gan_weight > 0.0:
                     with ctx:
-                        gan_loss = self.discriminator(batch_rec) / accum_steps
+                        gan_loss = g_loss(self.discriminator, batch_rec) / accum_steps
                         total_loss += crnt_gan_weight * gan_loss
-                    metrics.log('gan_loss', gan_loss)
+                metrics.log('gan_loss', gan_loss)
 
                 self.scaler.scale(total_loss).backward()
 
