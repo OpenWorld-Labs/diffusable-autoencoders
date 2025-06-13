@@ -30,7 +30,11 @@ class BaseTrainer:
             else:
                 device = torch.device('cpu')
         elif type(device) == str:
-            device = torch.device(device)
+            if device.find(':') != -1:
+                # device is a string of the form "cuda:0"
+                device = torch.device(device)
+            else:
+                device = torch.device(device, self.local_rank)
         self.device = device
 
         if 'cuda' in self.device.type:

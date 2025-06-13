@@ -54,7 +54,6 @@ class Encoder(nn.Module):
         self.conv_out = nn.Conv2d(ch, config.latent_channels, 1, 1, 0, bias=False)
         self.reduce = Reduce('b (rep c) h w -> b c h w', rep = self.avg_factor, reduction = 'mean')
 
-    @torch.compiler.disable(recursive=False)
     def forward(self, x):
         x = self.conv_in(x)
         x = self.l_to_s(x)
