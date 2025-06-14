@@ -97,7 +97,7 @@ class RecTrainer(BaseTrainer):
         )
 
         # compile all training and frozen models
-        # self.model = torch.compile(self.model, mode="max-autotune", fullgraph=True)
+        self.model = torch.compile(self.model, mode="max-autotune", fullgraph=True)
         self.ema = torch.compile(self.ema, mode="max-autotune", fullgraph=True)
         lpips = torch.compile(lpips, mode="max-autotune", fullgraph=True)
 
@@ -114,7 +114,7 @@ class RecTrainer(BaseTrainer):
         accum_steps = self.train_cfg.target_batch_size // self.train_cfg.batch_size // self.world_size
         accum_steps = max(1, accum_steps)
         self.scaler = torch.amp.GradScaler()
-        ctx = torch.amp.autocast(f'cuda:{self.local_rank}', torch.bfloat16)
+        ctx = torch.amp.autocast(str(self.device), torch.bfloat16)
 
         # Timer reset
         timer = Timer()
@@ -128,12 +128,18 @@ class RecTrainer(BaseTrainer):
 
         local_step = 0
         for _ in range(self.train_cfg.epochs):
+            counter = 0
             for batch in loader:
                 total_loss = 0.
                 batch = batch.bfloat16().to(self.device)
 
+                # cuda graphs should not free memory in between the grad accumulation steps
+                if local_step % accum_steps == 0:
+                    torch.compiler.cudagraph_mark_step_begin()
+
                 with ctx:
                     out = self.model(batch)
+                    counter += 1
                     if len(out) == 2:
                         batch_rec, z = out
                     elif len(out) == 3:
@@ -148,7 +154,7 @@ class RecTrainer(BaseTrainer):
                     with ctx:
                         with torch.no_grad():
                             down_batch = F.interpolate(batch, scale_factor=.5, mode = 'bilinear')
-                        se_loss = F.mse_loss(down_rec, down_batch) / accum_steps
+                            se_loss = F.mse_loss(down_rec, down_batch) / accum_steps
                         if lpips_weight > 0.0:
                             se_loss += lpips_weight * lpips(down_rec, down_batch) / accum_steps
                         total_loss += se_reg_weight * se_loss
@@ -179,7 +185,6 @@ class RecTrainer(BaseTrainer):
                     # Updates
                     self.scaler.unscale_(self.opt)
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-
                     self.scaler.step(self.opt)
                     self.opt.zero_grad(set_to_none=True)
 
