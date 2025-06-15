@@ -132,8 +132,6 @@ class DecTuneTrainer(BaseTrainer):
         self.encoder = self.encoder.to(self.device).bfloat16().eval()
         freeze(self.encoder)
 
-        self.encoder = torch.compile(self.encoder)
-
         self.ema = EMA(
             self.model,
             beta = 0.9999,
@@ -219,13 +217,6 @@ class DecTuneTrainer(BaseTrainer):
             real_loss = F.relu(1 - real_out).mean()
 
             return r1_penalty, r2_penalty, (fake_loss + real_loss)
-
-        # compile all nn.Modules
-        self.model = torch.compile(self.model, mode="max-autotune", fullgraph=True)
-        self.discriminator = torch.compile(self.discriminator, mode="max-autotune", fullgraph=True)
-        self.lpips = torch.compile(self.lpips, mode="max-autotune", fullgraph=True)
-        self.encoder = torch.compile(self.encoder, mode="max-autotune", fullgraph=True)
-        self.ema = torch.compile(self.ema, mode="max-autotune", fullgraph=True)
 
         local_step = 0
         for _ in range(self.train_cfg.epochs):

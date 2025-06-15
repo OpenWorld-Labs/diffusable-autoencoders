@@ -96,11 +96,6 @@ class RecTrainer(BaseTrainer):
             update_every = 1
         )
 
-        # compile all training and frozen models
-        self.model = torch.compile(self.model, mode="max-autotune", fullgraph=True)
-        self.ema = torch.compile(self.ema, mode="max-autotune", fullgraph=True)
-        lpips = torch.compile(lpips, mode="max-autotune", fullgraph=True)
-
         # Set up optimizer and scheduler
         if self.train_cfg.opt.lower() == "muon":
             self.opt = init_muon(self.model, rank=self.rank,world_size=self.world_size,**self.train_cfg.opt_kwargs)

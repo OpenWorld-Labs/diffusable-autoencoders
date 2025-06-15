@@ -131,11 +131,6 @@ class ProxyTrainer(BaseTrainer):
         # Dataset setup
         loader = get_loader(self.train_cfg.data_id, self.train_cfg.batch_size)
 
-        # Compile nn.Modules
-        self.model = torch.compile(self.model, mode="max-autotune", fullgraph=True)
-        self.teacher = torch.compile(self.teacher, mode="max-autotune", fullgraph=True)
-        self.ema = torch.compile(self.ema, mode="max-autotune", fullgraph=True)
-
         local_step = 0
         for _ in range(self.train_cfg.epochs):
             for batch in loader:
