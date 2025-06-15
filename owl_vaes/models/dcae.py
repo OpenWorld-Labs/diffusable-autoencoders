@@ -160,7 +160,7 @@ def dcae_test():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     cfg = ResNetConfig(
-        sample_size=256,
+        sample_size=(256, 256),
         channels=3,
         latent_size=32,
         latent_channels=4,
@@ -174,10 +174,9 @@ def dcae_test():
     model = DCAE(cfg).bfloat16().to(device)
     with torch.no_grad():
         x = torch.randn(1, 3, 256, 256).bfloat16().to(device)
-        (rec, z, down_rec), time_duration, memory_used = benchmark(model, x)
+        (rec, z), time_duration, memory_used = benchmark(model, x)
         assert rec.shape == (1, 3, 256, 256), f"Expected shape (1,3,256,256), got {rec.shape}"
         assert z.shape == (1, 4, 32, 32), f"Expected shape (1,4,32,32), got {z.shape}"
-        assert down_rec.shape == (1, 3, 128, 128), f"Expected shape (1,3,128,128), got {down_rec.shape}"
     print("Test passed!")
     print(f"Time taken: {time_duration} seconds")
     print(f"Memory used: {memory_used / 1024**2} MB")
