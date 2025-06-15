@@ -1,7 +1,8 @@
-
+import torch
 from .titok import TiToKVAE
 from ..nn.lfq import LFQModule
 
+@torch.compile(mode="max-autotune", fullgraph=True)
 class TiToKVQVAE(TiToKVAE):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

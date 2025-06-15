@@ -67,6 +67,7 @@ class Decoder(nn.Module):
 
         return x
 
+@torch.compile(mode="max-autotune", fullgraph=True)
 class TiToKVAE(nn.Module):
     def __init__(self, config : 'TransformerConfig'):
         super().__init__()
@@ -92,6 +93,7 @@ class TiToKVAE(nn.Module):
 
 def titok_test():
     from ..configs import TransformerConfig
+    from ..utils import benchmark
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     cfg = TransformerConfig(
@@ -108,11 +110,12 @@ def titok_test():
     model = TiToKVAE(cfg).bfloat16().to(device)
     with torch.no_grad():
         x = torch.randn(1, 32, 16, 16).bfloat16().to(device)
-        rec, z = model(x)
+        (rec, z), time_duration, memory_used = benchmark(model, x)
         assert rec.shape == (1, 32, 16, 16), f"Expected shape (1,32,16,16), got {rec.shape}"
         assert z.shape == (1, 16, 128), f"Expected shape (1,16,128), got {z.shape}"
-    
     print("Test passed!")
+    print(f"Time taken: {time_duration} seconds")
+    print(f"Memory used: {memory_used / 1024**2} MB")
     
 if __name__ == "__main__":
     titok_test()

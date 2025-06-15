@@ -143,6 +143,7 @@ class Decoder(nn.Module):
         x = self.conv_out(x)
         return torch.tanh(x)
 
+@torch.compile(mode="max-autotune", fullgraph=True)
 class OobleckVAE(nn.Module):
     def __init__(self, config):
         super().__init__()

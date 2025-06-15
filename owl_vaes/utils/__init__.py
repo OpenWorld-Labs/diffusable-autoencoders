@@ -66,14 +66,3 @@ def benchmark(func, *args, **kwargs):
     torch.cuda.synchronize()
     end = timeit.default_timer()
     return output, (end - begin), torch.cuda.max_memory_allocated()
-
-def custom_viz_backend(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
-    """
-    From torch.compile docs, for visualizing the FX graph of a model.
-    It takes the inputs but doesn't run the model using them.
-    Also, the optimized kernels are not captured, only the FX graph is printed.
-    Each backend will optimize the graph differently based on their kernels.
-    """
-    print("Custom backend called with FX graph:")
-    gm.graph.print_tabular()
-    return gm.forward
