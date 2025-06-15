@@ -174,7 +174,7 @@ class RecTrainer(BaseTrainer):
 
                 self.scaler.scale(total_loss).backward()
 
-                with torch.no_grad():
+                with torch.inference_mode():
                     metrics.log_dict({
                         'z_std' : z.std() / accum_steps,
                         'z_shift' : z.mean() / accum_steps
@@ -197,7 +197,7 @@ class RecTrainer(BaseTrainer):
                         self.ema.update()
 
                     # Do logging stuff with sampling stuff in the middle
-                    with torch.no_grad():
+                    with torch.inference_mode():
                         wandb_dict = metrics.pop()
                         wandb_dict['time'] = timer.hit()
                         wandb_dict['lr'] = self.opt.param_groups[0]['lr']

@@ -114,7 +114,7 @@ class DecTuneTrainer(BaseTrainer):
         gan_weight = self.train_cfg.loss_weights.get('gan', 0.1)
         r12_weight = self.train_cfg.loss_weights.get('r12', 0.0)
 
-        # Prepare model, lpips, ema
+        # Prepare model, lpips, discriminator, encoder, ema
         self.model = self.model.to(self.device).train()
         if self.world_size > 1:
             self.model = DDP(self.model)
@@ -126,14 +126,13 @@ class DecTuneTrainer(BaseTrainer):
 
         self.lpips = None
         if lpips_weight > 0.0:
-            lpips = get_lpips_cls(self.train_cfg.lpips_id)(self.device).to(self.device).eval()
-            freeze(lpips)
+            self.lpips = get_lpips_cls(self.train_cfg.lpips_id)(self.device).to(self.device).eval()
+            freeze(self.lpips)
 
         self.encoder = self.encoder.to(self.device).bfloat16().eval()
         freeze(self.encoder)
 
         self.encoder = torch.compile(self.encoder)
-        #self.lpips.model = torch.compile(self.lpips.model)
 
         self.ema = EMA(
             self.model,
@@ -141,13 +140,6 @@ class DecTuneTrainer(BaseTrainer):
             update_after_step = 0,
             update_every = 1
         )
-
-        # compile all training and frozen models
-        self.encoder = torch.compile(self.encoder, mode="max-autotune", fullgraph=True)
-        self.lpips = torch.compile(self.lpips, mode="max-autotune", fullgraph=True)
-        self.model = torch.compile(self.model, mode="max-autotune", fullgraph=True)
-        self.discriminator = torch.compile(self.discriminator, mode="max-autotune", fullgraph=True)
-        self.ema = torch.compile(self.ema, mode="max-autotune", fullgraph=True)
 
         # Set up optimizer and scheduler
         if self.train_cfg.opt.lower() == "muon":
@@ -190,13 +182,15 @@ class DecTuneTrainer(BaseTrainer):
                 ramp = 0.5 * (1 - torch.cos(torch.tensor(x * torch.pi)).item())
                 return ramp * gan_weight  
 
+        @torch.compile(mode="max-autotune", fullgraph=True)
         def r_loss(d, x, sigma = 0.01):
             z = sigma * torch.randn_like(x)
             d_clean = d(x.detach())
             d_noisy = d(x.detach() + z)
 
             return ((d_clean - d_noisy).pow(2).mean())
-        
+
+        @torch.compile(mode="max-autotune", fullgraph=True)
         def d_loss(d, x_fake, x_real):
             fake_out = d(x_fake)
             real_out = d(x_real)
@@ -206,9 +200,11 @@ class DecTuneTrainer(BaseTrainer):
 
             return fake_loss + real_loss
 
+        @torch.compile(mode="max-autotune", fullgraph=True)
         def g_loss(d, x_fake):
             return -d(x_fake).mean()
 
+        @torch.compile(mode="max-autotune", fullgraph=True)
         def merged_d_losses(d, x_fake, x_real, sigma=0.01):
             fake_out = d(x_fake.detach())
             real_out = d(x_real.detach())
@@ -224,11 +220,22 @@ class DecTuneTrainer(BaseTrainer):
 
             return r1_penalty, r2_penalty, (fake_loss + real_loss)
 
+        # compile all nn.Modules
+        self.model = torch.compile(self.model, mode="max-autotune", fullgraph=True)
+        self.discriminator = torch.compile(self.discriminator, mode="max-autotune", fullgraph=True)
+        self.lpips = torch.compile(self.lpips, mode="max-autotune", fullgraph=True)
+        self.encoder = torch.compile(self.encoder, mode="max-autotune", fullgraph=True)
+        self.ema = torch.compile(self.ema, mode="max-autotune", fullgraph=True)
+
         local_step = 0
         for _ in range(self.train_cfg.epochs):
             for batch in loader:
                 total_loss = 0.
                 batch = batch.to(self.device).bfloat16()
+
+                # cuda graphs should not free memory in between the grad accumulation steps
+                if local_step % accum_steps == 0:
+                    torch.compiler.cudagraph_mark_step_begin()
 
                 with torch.no_grad() and ctx:
                     teacher_z = self.encoder(batch) / self.train_cfg.latent_scale
@@ -305,7 +312,7 @@ class DecTuneTrainer(BaseTrainer):
                         self.ema.update()
 
                     # Do logging stuff with sampling stuff in the middle
-                    with torch.no_grad():
+                    with torch.inference_mode():
                         wandb_dict = metrics.pop()
                         wandb_dict['time'] = timer.hit()
                         wandb_dict['lr'] = self.opt.param_groups[0]['lr']

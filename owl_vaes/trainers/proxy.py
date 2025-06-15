@@ -92,13 +92,12 @@ class ProxyTrainer(BaseTrainer):
         # Loss weights
         reg_weight = self.train_cfg.loss_weights.get('latent_reg', 0.0)
 
-        # Prepare model, lpips, ema
+        # Prepare model, teacher, ema
         self.model = self.model.to(self.device).train()
         if self.world_size > 1:
             self.model = DDP(self.model, device_ids=[self.local_rank])
 
         self.teacher = self.teacher.eval().bfloat16().to(self.device)
-        self.teacher = torch.compile(self.teacher, mode="max-autotune", fullgraph=True)
 
         self.ema = EMA(
             self.model,
@@ -106,7 +105,6 @@ class ProxyTrainer(BaseTrainer):
             update_after_step = 0,
             update_every = 1
         )
-        self.ema = torch.compile(self.ema, mode="max-autotune", fullgraph=True)
 
         # Set up optimizer and scheduler
         if self.train_cfg.opt.lower() == "muon":
@@ -121,7 +119,7 @@ class ProxyTrainer(BaseTrainer):
         accum_steps = self.train_cfg.target_batch_size // self.train_cfg.batch_size
         accum_steps = max(1, accum_steps)
         self.scaler = torch.amp.GradScaler()
-        ctx = torch.amp.autocast(f'cuda:{self.local_rank}',torch.bfloat16)
+        ctx = torch.amp.autocast(str(self.device), torch.bfloat16)
 
         # Timer reset
         timer = Timer()
@@ -133,11 +131,20 @@ class ProxyTrainer(BaseTrainer):
         # Dataset setup
         loader = get_loader(self.train_cfg.data_id, self.train_cfg.batch_size)
 
+        # Compile nn.Modules
+        self.model = torch.compile(self.model, mode="max-autotune", fullgraph=True)
+        self.teacher = torch.compile(self.teacher, mode="max-autotune", fullgraph=True)
+        self.ema = torch.compile(self.ema, mode="max-autotune", fullgraph=True)
+
         local_step = 0
         for _ in range(self.train_cfg.epochs):
             for batch in loader:
                 total_loss = 0.
                 batch = batch.bfloat16().to(self.device)
+
+                # cuda graphs should not free memory in between the grad accumulation steps
+                if local_step % accum_steps == 0:
+                    torch.compiler.cudagraph_mark_step_begin()
 
                 with ctx:
                     batch_rec, z = self.model(batch)
@@ -158,7 +165,7 @@ class ProxyTrainer(BaseTrainer):
 
                 self.scaler.scale(total_loss).backward()
 
-                with torch.no_grad():
+                with torch.inference_mode():
                     metrics.log_dict({
                         'z_std' : z.std() / accum_steps,
                         'z_shift' : z.mean() / accum_steps
@@ -182,7 +189,7 @@ class ProxyTrainer(BaseTrainer):
                         self.ema.update()
 
                     # Do logging stuff with sampling stuff in the middle
-                    with torch.no_grad():
+                    with torch.inference_mode():
                         wandb_dict = metrics.pop()
                         wandb_dict['time'] = timer.hit()
                         timer.reset()
