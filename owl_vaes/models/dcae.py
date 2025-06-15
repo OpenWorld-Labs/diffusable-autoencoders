@@ -174,6 +174,9 @@ def dcae_test():
     model = DCAE(cfg).bfloat16().to(device)
     with torch.no_grad():
         x = torch.randn(1, 3, 256, 256).bfloat16().to(device)
+        # warmups
+        for _ in range(3):
+            model(x)
         (rec, z), time_duration, memory_used = benchmark(model, x)
         assert rec.shape == (1, 3, 256, 256), f"Expected shape (1,3,256,256), got {rec.shape}"
         assert z.shape == (1, 4, 32, 32), f"Expected shape (1,4,32,32), got {z.shape}"

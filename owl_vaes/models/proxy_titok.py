@@ -111,6 +111,9 @@ def proxy_titok_test():
     model = ProxyTiToKVAE(cfg).bfloat16().to(device)
     with torch.no_grad():
         x = torch.randn(1, 3, 256, 256).bfloat16().to(device)
+        # warmups
+        for _ in range(3):
+            model(x)
         (rec, z), time_duration, memory_used = benchmark(model, x)
         assert rec.shape == (1, 32, 16, 16), f"Expected shape (1,32,16,16), got {rec.shape}"
         assert z.shape == (1, 16, 128), f"Expected shape (1,16,128), got {z.shape}"
