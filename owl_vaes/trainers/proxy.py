@@ -2,7 +2,7 @@
 Trainer for proxy models
 """
 
-import einops as eo
+from einops.layers.torch import Reduce
 import torch
 import torch.nn.functional as F
 import wandb
@@ -18,16 +18,17 @@ from ..utils import Timer, versatile_load
 from ..utils.logging import LogHelper, to_wandb
 from .base import BaseTrainer
 
+
 def latent_reg_loss(z):
     # z is [b,c,h,w]
     # KL divergence between N(z, 0.1) and N(0,1)
-    mu = z
     logvar = 2 * torch.log(torch.tensor(0.1))  # log(0.1^2)
 
-    # KL = -0.5 * sum(1 + logvar - mu^2 - exp(logvar))
-    kl = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp())
-    kl = eo.reduce(kl, 'b ... -> b', reduction='sum').mean()
+    # KL = -0.5 * sum(1 + logvar - z^2 - exp(logvar))
+    kl = -0.5 * (1 + logvar - z.pow(2) - logvar.exp())
+    kl = Reduce('b c h w -> b', reduction='sum')(kl).mean()
     return kl
+
 
 class ProxyTrainer(BaseTrainer):
     """
@@ -88,18 +89,15 @@ class ProxyTrainer(BaseTrainer):
         self.total_step_counter = save_dict['steps']
 
     def train(self):
-        torch.cuda.set_device(self.local_rank)
-
         # Loss weights
-        reg_weight =  self.train_cfg.loss_weights.get('latent_reg', 0.0)
+        reg_weight = self.train_cfg.loss_weights.get('latent_reg', 0.0)
 
-        # Prepare model, lpips, ema
-        self.model = self.model.cuda().train()
+        # Prepare model, teacher, ema
+        self.model = self.model.to(self.device).train()
         if self.world_size > 1:
             self.model = DDP(self.model, device_ids=[self.local_rank])
 
-        self.teacher = self.teacher.eval().cuda().bfloat16()
-        self.teacher.encoder = torch.compile(self.teacher.encoder)
+        self.teacher = self.teacher.eval().bfloat16().to(self.device)
 
         self.ema = EMA(
             self.model,
@@ -110,7 +108,7 @@ class ProxyTrainer(BaseTrainer):
 
         # Set up optimizer and scheduler
         if self.train_cfg.opt.lower() == "muon":
-            self.opt = init_muon(self.model, rank=self.rank,world_size=self.world_size,**self.train_cfg.opt_kwargs)
+            self.opt = init_muon(self.model, rank=self.rank, world_size=self.world_size, **self.train_cfg.opt_kwargs)
         else:
             self.opt = getattr(torch.optim, self.train_cfg.opt)(self.model.parameters(), **self.train_cfg.opt_kwargs)
 
@@ -121,7 +119,7 @@ class ProxyTrainer(BaseTrainer):
         accum_steps = self.train_cfg.target_batch_size // self.train_cfg.batch_size
         accum_steps = max(1, accum_steps)
         self.scaler = torch.amp.GradScaler()
-        ctx = torch.amp.autocast(f'cuda:{self.local_rank}',torch.bfloat16)
+        ctx = torch.amp.autocast(str(self.device), torch.bfloat16)
 
         # Timer reset
         timer = Timer()
@@ -137,26 +135,32 @@ class ProxyTrainer(BaseTrainer):
         for _ in range(self.train_cfg.epochs):
             for batch in loader:
                 total_loss = 0.
-                batch = batch.to('cuda').bfloat16()
+                batch = batch.bfloat16().to(self.device)
+
+                # cuda graphs should not free memory in between the grad accumulation steps
+                if local_step % accum_steps == 0:
+                    torch.compiler.cudagraph_mark_step_begin()
 
                 with ctx:
                     batch_rec, z = self.model(batch)
 
                 with torch.no_grad(), ctx:
-                    z_teacher = self.teacher.encoder(batch.bfloat16())
+                    z_teacher = self.teacher.encoder(batch)
 
                 if reg_weight > 0:
-                    reg_loss = latent_reg_loss(z) / accum_steps
-                    total_loss += reg_loss * reg_weight
+                    with ctx:
+                        reg_loss = latent_reg_loss(z) / accum_steps
+                        total_loss += reg_loss * reg_weight
                     metrics.log('reg_loss', reg_loss)
 
-                mse_loss = F.mse_loss(batch_rec, z_teacher) / accum_steps
-                total_loss += mse_loss
+                with ctx:
+                    mse_loss = F.mse_loss(batch_rec, z_teacher) / accum_steps
+                    total_loss += mse_loss
                 metrics.log('mse_loss', mse_loss)
 
                 self.scaler.scale(total_loss).backward()
 
-                with torch.no_grad():
+                with torch.inference_mode():
                     metrics.log_dict({
                         'z_std' : z.std() / accum_steps,
                         'z_shift' : z.mean() / accum_steps
@@ -175,10 +179,12 @@ class ProxyTrainer(BaseTrainer):
 
                     if self.scheduler is not None:
                         self.scheduler.step()
-                    self.ema.update()
+
+                    with ctx:
+                        self.ema.update()
 
                     # Do logging stuff with sampling stuff in the middle
-                    with torch.no_grad():
+                    with torch.inference_mode():
                         wandb_dict = metrics.pop()
                         wandb_dict['time'] = timer.hit()
                         timer.reset()
@@ -186,6 +192,7 @@ class ProxyTrainer(BaseTrainer):
                         if self.total_step_counter % self.train_cfg.sample_interval == 0:
                             with ctx:
                                 batch_rec = self.teacher.decoder(batch_rec.bfloat16())
+
                             wandb_dict['samples'] = to_wandb(
                                 batch.detach().contiguous().bfloat16(),
                                 batch_rec.detach().contiguous().bfloat16(),

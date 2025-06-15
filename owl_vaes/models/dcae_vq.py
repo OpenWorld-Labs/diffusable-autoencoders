@@ -1,7 +1,8 @@
-
+import torch
 from .dcae import DCAE
 from ..nn.lfq import LFQModule
 
+@torch.compile(mode="max-autotune", fullgraph=True)
 class DCVQVAE(DCAE):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

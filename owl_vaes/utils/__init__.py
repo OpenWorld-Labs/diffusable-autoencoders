@@ -1,3 +1,5 @@
+from typing import List
+import timeit
 import torch
 from torch import nn
 
@@ -55,3 +57,12 @@ def versatile_load(path):
 
 def prefix_filter(ckpt, prefix):
     return {k[len(prefix):] : v for (k,v) in ckpt.items() if k.startswith(prefix)}
+
+def benchmark(func, *args, **kwargs):
+    torch.cuda.synchronize()
+    torch.cuda.reset_peak_memory_stats()
+    begin = timeit.default_timer()
+    output = func(*args, **kwargs)
+    torch.cuda.synchronize()
+    end = timeit.default_timer()
+    return output, (end - begin), torch.cuda.max_memory_allocated()

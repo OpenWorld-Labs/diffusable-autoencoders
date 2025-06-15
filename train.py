@@ -7,6 +7,16 @@ from owl_vaes.trainers import get_trainer_cls
 from owl_vaes.utils.ddp import cleanup, setup
 
 if __name__ == "__main__":
+    # torch compile flag to convert conv with 1x1 kernel to matrix multiplication
+    torch._inductor.config.conv_1x1_as_mm = True
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cuda.matmul.allow_fp16_accumulation = True
+    torch.backends.cudnn.benchmark = True
+    # enable below if logging (.item call in LogHelper) doesn't happen with dynamic shape tensors, otherwise recompilation adds overhead.
+    # torch._dynamo.config.capture_scalar_outputs = True
+    # to enable print statements in torch.compile. Doesn't play well with max-tune and fullgraph though.
+    # torch._dynamo.config.reorderable_logging_functions.add(print)
+
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--config_path", type=str, help="Path to config YAML file")

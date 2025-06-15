@@ -2,7 +2,7 @@
 Trainer for reconstruction only
 """
 
-import einops as eo
+from einops.layers.torch import Reduce
 import torch
 import torch.nn.functional as F
 import wandb
@@ -18,6 +18,7 @@ from ..utils import Timer, freeze
 from ..utils.logging import LogHelper, to_wandb
 from .base import BaseTrainer
 from ..losses.basic import latent_reg_loss
+
 
 class RecTrainer(BaseTrainer):
     """
@@ -73,15 +74,13 @@ class RecTrainer(BaseTrainer):
         self.total_step_counter = save_dict['steps']
 
     def train(self):
-        torch.cuda.set_device(self.local_rank)
-
         # Loss weights
-        reg_weight =  self.train_cfg.loss_weights.get('latent_reg', 0.0)
+        reg_weight = self.train_cfg.loss_weights.get('latent_reg', 0.0)
         lpips_weight = self.train_cfg.loss_weights.get('lpips', 0.0)
         se_reg_weight = self.train_cfg.loss_weights.get('se_reg', 0.0)
 
         # Prepare model, lpips, ema
-        self.model = self.model.cuda().train()
+        self.model = self.model.to(self.device).train()
         if self.world_size > 1:
             self.model = DDP(self.model)
 
@@ -110,7 +109,7 @@ class RecTrainer(BaseTrainer):
         accum_steps = self.train_cfg.target_batch_size // self.train_cfg.batch_size // self.world_size
         accum_steps = max(1, accum_steps)
         self.scaler = torch.amp.GradScaler()
-        ctx = torch.amp.autocast(f'cuda:{self.local_rank}', torch.bfloat16)
+        ctx = torch.amp.autocast(str(self.device), torch.bfloat16)
 
         # Timer reset
         timer = Timer()
@@ -124,44 +123,53 @@ class RecTrainer(BaseTrainer):
 
         local_step = 0
         for _ in range(self.train_cfg.epochs):
+            counter = 0
             for batch in loader:
                 total_loss = 0.
-                batch = batch.to('cuda').bfloat16()
+                batch = batch.bfloat16().to(self.device)
+
+                # cuda graphs should not free memory in between the grad accumulation steps
+                if local_step % accum_steps == 0:
+                    torch.compiler.cudagraph_mark_step_begin()
+
                 with ctx:
                     out = self.model(batch)
+                    counter += 1
                     if len(out) == 2:
                         batch_rec, z = out
                     elif len(out) == 3:
                         batch_rec, z, down_rec = out
                 if reg_weight > 0:
-                    reg_loss = latent_reg_loss(z) / accum_steps
-                    total_loss += reg_loss * reg_weight
+                    with ctx:
+                        reg_loss = latent_reg_loss(z) / accum_steps
+                        total_loss += reg_loss * reg_weight
                     metrics.log('reg_loss', reg_loss)
 
                 if se_reg_weight > 0:
-                    with torch.no_grad():
-                        down_batch = F.interpolate(batch, scale_factor=.5, mode = 'bilinear')
-                    se_loss = F.mse_loss(down_rec, down_batch) / accum_steps
-                    if lpips_weight > 0.0:
-                        se_loss += lpips_weight * lpips(down_rec, down_batch) / accum_steps
+                    with ctx:
+                        with torch.no_grad():
+                            down_batch = F.interpolate(batch, scale_factor=.5, mode = 'bilinear')
+                            se_loss = F.mse_loss(down_rec, down_batch) / accum_steps
+                        if lpips_weight > 0.0:
+                            se_loss += lpips_weight * lpips(down_rec, down_batch) / accum_steps
+                        total_loss += se_reg_weight * se_loss
 
-                    total_loss += se_reg_weight * se_loss
                     metrics.log('se_loss', se_loss)
 
-
-                mse_loss = F.mse_loss(batch_rec, batch) / accum_steps
-                total_loss += mse_loss
+                with ctx:
+                    mse_loss = F.mse_loss(batch_rec, batch) / accum_steps
+                    total_loss += mse_loss
                 metrics.log('mse_loss', mse_loss)
 
                 if lpips_weight > 0.0:
                     with ctx:
                         lpips_loss = lpips(batch_rec, batch) / accum_steps
-                    total_loss += lpips_loss
+                        total_loss += lpips_loss
                     metrics.log('lpips_loss', lpips_loss)
 
                 self.scaler.scale(total_loss).backward()
 
-                with torch.no_grad():
+                with torch.inference_mode():
                     metrics.log_dict({
                         'z_std' : z.std() / accum_steps,
                         'z_shift' : z.mean() / accum_steps
@@ -172,7 +180,6 @@ class RecTrainer(BaseTrainer):
                     # Updates
                     self.scaler.unscale_(self.opt)
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-
                     self.scaler.step(self.opt)
                     self.opt.zero_grad(set_to_none=True)
 
@@ -180,10 +187,12 @@ class RecTrainer(BaseTrainer):
 
                     if self.scheduler is not None:
                         self.scheduler.step()
-                    self.ema.update()
+
+                    with ctx:
+                        self.ema.update()
 
                     # Do logging stuff with sampling stuff in the middle
-                    with torch.no_grad():
+                    with torch.inference_mode():
                         wandb_dict = metrics.pop()
                         wandb_dict['time'] = timer.hit()
                         wandb_dict['lr'] = self.opt.param_groups[0]['lr']
